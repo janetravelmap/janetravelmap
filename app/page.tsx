@@ -132,7 +132,7 @@ export default function Home() {
     const countryId = String(data.get("countryId"));
     const countryName = worldCountries.find((item) => item.id === countryId)?.label ?? "未知國家";
     const trip: Trip = {
-      id: editingTrip?.id ?? Date.now(), country: countryName, countryId, city: String(data.get("city")),
+      id: editingTrip?.id ?? 0, country: countryName, countryId, city: String(data.get("city")),
       date: `${String(data.get("year"))}.${String(data.get("month"))}`, note: String(data.get("note")), color: "#147fe5",
     };
     try {
@@ -141,7 +141,7 @@ export default function Home() {
       if (!response.ok) throw new Error("save failed");
       const result = await response.json() as { trip: Trip };
       setTrips((current) => editingTrip ? current.map((item) => item.id === editingTrip.id ? result.trip : item) : [result.trip, ...current]);
-      setSelected(result.trip); setEditingTrip(null); setModalOpen(false); event.currentTarget.reset();
+      setSelected(result.trip); setEditingTrip(null); setModalOpen(false);
     } catch { setSyncError("這筆紀錄尚未儲存，請確認網路後再試一次。"); }
   }
 
