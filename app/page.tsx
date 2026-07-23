@@ -138,10 +138,35 @@ export default function Home() {
     try {
       setSyncError("");
       const response = await fetch("/api/trips", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trip }) });
-      if (!response.ok) throw new Error("save failed");
-      const result = await response.json() as { trip: Trip };
-      setTrips((current) => editingTrip ? current.map((item) => item.id === editingTrip.id ? result.trip : item) : [result.trip, ...current]);
-      setSelected(result.trip); setEditingTrip(null); setModalOpen(false);
+      let savedTrip: Trip | undefined;
+      if (response.ok) {
+        try {
+          const result = await response.json() as { trip?: Trip };
+          savedTrip = result.trip;
+        } catch {
+          savedTrip = undefined;
+        }
+      }
+
+      if (!savedTrip) {
+        const refresh = await fetch("/api/trips", { cache: "no-store" });
+        if (!refresh.ok) throw new Error("save verification failed");
+        const cloud = await refresh.json() as { trips: Trip[]; user: Account };
+        savedTrip = editingTrip
+          ? cloud.trips.find((item) => item.id === editingTrip.id)
+          : cloud.trips.find((item) =>
+              item.countryId === trip.countryId &&
+              item.city === trip.city &&
+              item.date === trip.date &&
+              item.note === trip.note
+            );
+        if (!savedTrip) throw new Error("saved trip not found");
+        setTrips(cloud.trips);
+        setAccount(cloud.user);
+      } else {
+        setTrips((current) => editingTrip ? current.map((item) => item.id === editingTrip.id ? savedTrip! : item) : [savedTrip!, ...current]);
+      }
+      setSelected(savedTrip); setEditingTrip(null); setModalOpen(false);
     } catch { setSyncError("這筆紀錄尚未儲存，請確認網路後再試一次。"); }
   }
 
