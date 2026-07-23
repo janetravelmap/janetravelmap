@@ -145,6 +145,26 @@ export default function Home() {
     } catch { setSyncError("這筆紀錄尚未儲存，請確認網路後再試一次。"); }
   }
 
+  async function deleteTrip() {
+    if (!editingTrip) return;
+    if (!window.confirm(`確定要刪除「${editingTrip.country} · ${editingTrip.city}」嗎？刪除後無法復原。`)) return;
+    try {
+      setSyncError("");
+      const response = await fetch("/api/trips", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: editingTrip.id }),
+      });
+      if (!response.ok) throw new Error("delete failed");
+      setTrips((current) => current.filter((trip) => trip.id !== editingTrip.id));
+      if (selected?.id === editingTrip.id) setSelected(null);
+      setEditingTrip(null);
+      setModalOpen(false);
+    } catch {
+      setSyncError("這筆紀錄沒有刪除成功，請確認網路後再試一次。");
+    }
+  }
+
   async function changeDisplayName() {
     const nextName = window.prompt("想在旅行足跡上顯示什麼名稱？", account?.displayName ?? "");
     if (!nextName?.trim()) return;
@@ -282,6 +302,7 @@ export default function Home() {
       {modalOpen && <div className="modal-backdrop" onMouseDown={() => { setModalOpen(false); setEditingTrip(null); }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <button className="close" onClick={() => { setModalOpen(false); setEditingTrip(null); }} aria-label="關閉">×</button><p className="eyebrow">{editingTrip ? "EDIT FOOTPRINT" : "NEW FOOTPRINT"}</p><h2>{editingTrip ? "編輯旅行紀錄" : "新增一段旅行"}</h2><p>{editingTrip ? "修改後，地圖與統計會同步更新。" : "把國家、城市與最想記住的片刻收藏起來。"}</p>
         <form key={editingTrip?.id ?? "new"} onSubmit={saveTrip}><label>國家<select name="countryId" required defaultValue={editingTrip?.countryId ?? resolveCountryId(editingTrip?.country ?? "") ?? ""}><option value="" disabled>請選擇國家</option>{worldCountries.map((country) => <option key={country.id} value={country.id}>{country.label}</option>)}</select></label><label>城市（可輸入多個）<input name="city" placeholder="例如：大阪／京都" required defaultValue={editingTrip?.city ?? ""} /></label><div className="date-fields"><label>旅行年份<select name="year" required defaultValue={editingTrip?.date.slice(0, 4) ?? String(currentYear)}>{travelYears.map((year) => <option key={year} value={year}>{year} 年</option>)}</select></label><label>旅行月份<select name="month" required defaultValue={editingTrip?.date.slice(5, 7) || "01"}>{travelMonths.map((month) => <option key={month} value={month}>{Number(month)} 月</option>)}</select></label></div><label>旅行回憶<textarea name="note" placeholder="這趟旅程最難忘的是……" rows={3} defaultValue={editingTrip?.note ?? ""}/></label><button className="primary" type="submit">{editingTrip ? "儲存修改" : "儲存旅行足跡"}</button></form>
+        {editingTrip && <button className="delete-trip" type="button" onClick={deleteTrip}>刪除這筆旅行紀錄</button>}
       </div></div>}
     </main>
   );
