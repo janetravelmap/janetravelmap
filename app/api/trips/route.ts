@@ -52,3 +52,18 @@ export async function POST(request: Request) {
   const [created] = await db.insert(trips).values({ ...input, ownerEmail: user.email }).returning();
   return Response.json({ trip: created }, { status: 201 });
 }
+
+export async function DELETE(request: Request) {
+  const user = await getChatGPTUser();
+  if (!user) return Response.json({ error: "請先登入" }, { status: 401 });
+  const payload = await request.json() as { id?: number };
+  const id = Number(payload.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return Response.json({ error: "旅行紀錄編號無效" }, { status: 400 });
+  }
+  const [deleted] = await getDb().delete(trips)
+    .where(and(eq(trips.id, id), eq(trips.ownerEmail, user.email)))
+    .returning({ id: trips.id });
+  if (!deleted) return Response.json({ error: "找不到這筆旅行紀錄" }, { status: 404 });
+  return Response.json({ deletedId: deleted.id });
+}
