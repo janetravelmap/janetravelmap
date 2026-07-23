@@ -8,7 +8,7 @@
     {
       "binding": "DB",
       "database_name": "janetravelmap-db",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "b655a0c7-0977-43f4-9ede-e51aac7a0d50",
       "migrations_dir": "drizzle"
     }
   ]
