@@ -1,0 +1,1 @@
+ALTER TABLE `profiles` ADD `theme` text DEFAULT 'blue' NOT NULL;

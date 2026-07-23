@@ -1,0 +1,1 @@
+ALTER TABLE `profiles` ADD `map_color` text DEFAULT '#147fe5' NOT NULL;
