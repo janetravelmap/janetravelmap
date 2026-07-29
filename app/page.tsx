@@ -1,8 +1,9 @@
 "use client";
 
 import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { geoMercator, geoNaturalEarth1, geoPath } from "d3-geo";
+import { geoArea, geoMercator, geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
+import type { Feature, Geometry, Polygon } from "geojson";
 import type { GeometryCollection, Topology } from "topojson-specification";
 import worldData from "world-atlas/countries-50m.json";
 import { canonicalCountryCount, countryNameById, countryOptions } from "./countries";
@@ -41,6 +42,16 @@ function resolveCountryId(countryName: string) {
 }
 
 type CityMarker = { city: string; count: number; longitude: number; latitude: number };
+
+function largestPolygon(country: Feature<Geometry>) {
+  if (country.geometry.type !== "MultiPolygon") return country;
+  const coordinates = country.geometry.coordinates.reduce((largest, candidate) => {
+    const largestArea = geoArea({ type: "Polygon", coordinates: largest } as Polygon);
+    const candidateArea = geoArea({ type: "Polygon", coordinates: candidate } as Polygon);
+    return candidateArea > largestArea ? candidate : largest;
+  });
+  return { ...country, geometry: { type: "Polygon", coordinates } as Polygon } as Feature<Polygon>;
+}
 
 export default function Home() {
   const [trips, setTrips] = useState<Trip[]>(() => {
@@ -137,7 +148,12 @@ export default function Home() {
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-Hant"));
   }, [trips, activeStatsCountryId]);
   const statsCountryName = countryNameById.get(activeStatsCountryId);
-  const statsCountryGeometry = worldCountries.find((country) => country.id === activeStatsCountryId)?.geometry;
+  const rawStatsCountryGeometry = worldCountries.find((country) => country.id === activeStatsCountryId)?.geometry as Feature<Geometry> | undefined;
+  const statsCountryGeometry = useMemo(() =>
+    rawStatsCountryGeometry && activeStatsCountryId === "840"
+      ? largestPolygon(rawStatsCountryGeometry)
+      : rawStatsCountryGeometry
+  , [activeStatsCountryId, rawStatsCountryGeometry]);
   const cityProjection = useMemo(() => statsCountryGeometry
     ? geoMercator().fitExtent([[42, 30], [758, 390]], statsCountryGeometry)
     : null, [statsCountryGeometry]);
