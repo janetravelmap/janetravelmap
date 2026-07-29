@@ -1,9 +1,10 @@
 /* eslint-disable @next/next/no-html-link-for-pages */
-import { count, countDistinct, desc, eq, gte, sql } from "drizzle-orm";
+import { and, count, countDistinct, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { requireChatGPTUser } from "../chatgpt-auth";
 import { getDb } from "../../db";
-import { profiles, trips, users } from "../../db/schema";
+import { ensureAnonymousVisitorsTable } from "../../db/anonymous";
+import { anonymousVisitors, profiles, trips, users } from "../../db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +14,20 @@ export default async function AdminPage() {
   const user = await requireChatGPTUser("/admin");
   if (!ADMIN_EMAILS.has(user.email.toLowerCase())) notFound();
 
+  await ensureAnonymousVisitorsTable();
   const db = getDb();
   const [totalUsersRow] = await db.select({ value: count() }).from(users);
   const [weekUsersRow] = await db.select({ value: count() }).from(users).where(gte(users.lastSeenAt, sql<string>`strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')`));
   const [monthUsersRow] = await db.select({ value: count() }).from(users).where(gte(users.lastSeenAt, sql<string>`strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')`));
   const [tripUsersRow] = await db.select({ value: countDistinct(trips.ownerEmail) }).from(trips);
   const [tripsRow] = await db.select({ value: count() }).from(trips);
+  const [anonymousRow] = await db.select({ value: count() }).from(anonymousVisitors);
+  const [anonymousWeekRow] = await db.select({ value: count() }).from(anonymousVisitors)
+    .where(gte(anonymousVisitors.lastSeenAt, sql<string>`strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')`));
+  const [startedRow] = await db.select({ value: count() }).from(anonymousVisitors)
+    .where(isNotNull(anonymousVisitors.startedAt));
+  const [convertedRow] = await db.select({ value: count() }).from(anonymousVisitors)
+    .where(and(isNotNull(anonymousVisitors.startedAt), isNotNull(anonymousVisitors.convertedAt)));
   const userRows = await db.select({
     email: users.ownerEmail,
     displayName: profiles.displayName,
@@ -47,6 +56,11 @@ export default async function AdminPage() {
   const tripUsers = tripUsersRow?.value ?? 0;
   const totalTrips = tripsRow?.value ?? 0;
   const averageTrips = tripUsers ? (totalTrips / tripUsers).toFixed(1) : "0";
+  const anonymousVisitorsTotal = anonymousRow?.value ?? 0;
+  const anonymousVisitorsWeek = anonymousWeekRow?.value ?? 0;
+  const anonymousStarted = startedRow?.value ?? 0;
+  const anonymousConverted = convertedRow?.value ?? 0;
+  const conversionRate = anonymousStarted ? `${((anonymousConverted / anonymousStarted) * 100).toFixed(1)}%` : "0%";
 
   return <main className="admin-page">
     <header><div><p>PRIVATE DASHBOARD</p><h1>網站使用統計</h1><span>只有管理員帳號能查看</span></div><a href="/">返回旅行足跡</a></header>
@@ -57,6 +71,18 @@ export default async function AdminPage() {
       <article><span>已建立足跡者</span><strong>{tripUsers}</strong><small>至少有一筆旅行紀錄</small></article>
       <article><span>旅行紀錄總數</span><strong>{totalTrips}</strong><small>全站紀錄合計</small></article>
       <article><span>平均每人紀錄</span><strong>{averageTrips}</strong><small>以有足跡的使用者計算</small></article>
+    </section>
+    <section className="admin-users">
+      <div className="admin-users-head">
+        <div><p>ANONYMOUS FUNNEL</p><h2>匿名訪客使用情況</h2><span>只使用瀏覽器隨機編號，不記錄姓名、Email 或旅行內容</span></div>
+      </div>
+      <section className="admin-grid">
+        <article><span>匿名訪客</span><strong>{anonymousVisitorsTotal}</strong><small>統計上線後的不重複瀏覽器</small></article>
+        <article><span>近 7 天訪客</span><strong>{anonymousVisitorsWeek}</strong><small>近七天曾開啟網站</small></article>
+        <article><span>按下新增旅行</span><strong>{anonymousStarted}</strong><small>有進一步使用意願</small></article>
+        <article><span>完成登入</span><strong>{anonymousConverted}</strong><small>按新增後完成 Google 登入</small></article>
+        <article><span>登入轉換率</span><strong>{conversionRate}</strong><small>完成登入 ÷ 按下新增旅行</small></article>
+      </section>
     </section>
     <section className="admin-users">
       <div className="admin-users-head">
@@ -80,7 +106,7 @@ export default async function AdminPage() {
         </table>
       </div>
     </section>
-    <aside className="admin-note"><b>資料與隱私說明</b><p>登入與活躍時間從統計功能上線後開始累積；較早以前的登入若沒有再次開啟網站，無法回推。信箱及旅行資料只供網站管理、客服與搬家備份使用，請勿公開分享匯出的檔案。</p></aside>
+    <aside className="admin-note"><b>資料與隱私說明</b><p>登入及匿名統計都從功能上線後開始累積，無法回推較早的訪客。匿名統計只使用瀏覽器產生的隨機編號；信箱及旅行資料只供網站管理、客服與搬家備份使用，請勿公開分享匯出的檔案。</p></aside>
   </main>;
 }
 
