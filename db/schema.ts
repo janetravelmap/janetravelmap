@@ -13,6 +13,18 @@ export const users = sqliteTable("users", {
   lastSeenAt: text("last_seen_at").notNull(),
 }, (table) => [index("users_last_seen_idx").on(table.lastSeenAt)]);
 
+export const anonymousVisitors = sqliteTable("anonymous_visitors", {
+  visitorId: text("visitor_id").primaryKey(),
+  firstSeenAt: text("first_seen_at").notNull(),
+  lastSeenAt: text("last_seen_at").notNull(),
+  startedAt: text("started_at"),
+  convertedAt: text("converted_at"),
+}, (table) => [
+  index("anonymous_visitors_last_seen_idx").on(table.lastSeenAt),
+  index("anonymous_visitors_started_idx").on(table.startedAt),
+  index("anonymous_visitors_converted_idx").on(table.convertedAt),
+]);
+
 export const sessions = sqliteTable("sessions", {
   tokenHash: text("token_hash").primaryKey(),
   ownerEmail: text("owner_email").notNull(),
