@@ -87,7 +87,10 @@ export default function Home() {
   const [cityMapConsent, setCityMapConsent] = useState(() =>
     typeof window !== "undefined" && localStorage.getItem(cityMapConsentKey) === "yes"
   );
+  const [cityMapZoom, setCityMapZoom] = useState(1);
+  const [cityMapPan, setCityMapPan] = useState({ x: 0, y: 0 });
   const dragStart = useRef<{ pointerX: number; pointerY: number; panX: number; panY: number } | null>(null);
+  const cityDragStart = useRef<{ pointerX: number; pointerY: number; panX: number; panY: number } | null>(null);
 
   function trackAnonymousEvent(event: "visit" | "start" | "convert") {
     let visitorId = localStorage.getItem(visitorStorageKey);
@@ -180,19 +183,23 @@ export default function Home() {
         const key = `${activeStatsCountryId}:${city}`;
         let coordinates = cache[key];
         if (!coordinates) {
-          try {
-            const query = new URLSearchParams({ q: `${city}, ${statsCountryName}`, format: "jsonv2", limit: "1" });
-            const response = await fetch(`https://nominatim.openstreetmap.org/search?${query}`);
-            const [result] = response.ok ? await response.json() as Array<{ lon: string; lat: string }> : [];
-            if (result) {
-              coordinates = { longitude: Number(result.lon), latitude: Number(result.lat) };
-              cache[key] = coordinates;
-              localStorage.setItem(cacheKey, JSON.stringify(cache));
+          const cityQueries = [...new Set([city, city.replace(/島$/, "")])].filter(Boolean);
+          for (const cityQuery of cityQueries) {
+            try {
+              const query = new URLSearchParams({ q: `${cityQuery}, ${statsCountryName}`, format: "jsonv2", limit: "1" });
+              const response = await fetch(`https://nominatim.openstreetmap.org/search?${query}`);
+              const [result] = response.ok ? await response.json() as Array<{ lon: string; lat: string }> : [];
+              if (result) {
+                coordinates = { longitude: Number(result.lon), latitude: Number(result.lat) };
+                cache[key] = coordinates;
+                localStorage.setItem(cacheKey, JSON.stringify(cache));
+              }
+            } catch {
+              coordinates = undefined;
             }
-          } catch {
-            coordinates = undefined;
+            await new Promise((resolve) => window.setTimeout(resolve, 1100));
+            if (coordinates) break;
           }
-          await new Promise((resolve) => window.setTimeout(resolve, 1100));
         }
         if (cancelled) return;
         if (coordinates) markers.push({ city, count, ...coordinates });
@@ -351,6 +358,32 @@ export default function Home() {
     if (zoom === 1) setMapPan({ x: 0, y: 0 });
   }
 
+  function startCityPan(event: ReactPointerEvent<SVGSVGElement>) {
+    if (cityMapZoom <= 1) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    cityDragStart.current = { pointerX: event.clientX, pointerY: event.clientY, panX: cityMapPan.x, panY: cityMapPan.y };
+  }
+
+  function moveCityPan(event: ReactPointerEvent<SVGSVGElement>) {
+    if (!cityDragStart.current) return;
+    const limit = 190 * (cityMapZoom - 1);
+    setCityMapPan({
+      x: Math.max(-limit, Math.min(limit, cityDragStart.current.panX + event.clientX - cityDragStart.current.pointerX)),
+      y: Math.max(-limit * .65, Math.min(limit * .65, cityDragStart.current.panY + event.clientY - cityDragStart.current.pointerY)),
+    });
+  }
+
+  function stopCityPan(event: ReactPointerEvent<SVGSVGElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    cityDragStart.current = null;
+  }
+
+  function changeCityZoom(nextZoom: number) {
+    const zoom = Math.max(1, Math.min(3, nextZoom));
+    setCityMapZoom(zoom);
+    if (zoom === 1) setCityMapPan({ x: 0, y: 0 });
+  }
+
   return (
     <main data-theme={account?.theme || "blue"} style={{ "--visited-color": account?.mapColor || "#147fe5" } as CSSProperties}>
       <header className="topbar">
@@ -402,23 +435,26 @@ export default function Home() {
 
       <section className="travel-stats" id="travel-stats">
         <div className="travel-stats-head"><div><p>TRAVEL STATISTICS</p><h2>旅遊統計</h2><span>選擇國家，看看去過哪些城市與次數</span></div>
-          <label>查看國家<select value={activeStatsCountryId} onChange={(event) => setStatsCountryId(event.target.value)} disabled={!visitedCountryOptions.length}>{visitedCountryOptions.length ? visitedCountryOptions.map((country) => <option key={country.id} value={country.id}>{country.label}</option>) : <option value="">尚無造訪紀錄</option>}</select></label>
+          <label>查看國家<select value={activeStatsCountryId} onChange={(event) => { setStatsCountryId(event.target.value); setCityMapZoom(1); setCityMapPan({ x: 0, y: 0 }); }} disabled={!visitedCountryOptions.length}>{visitedCountryOptions.length ? visitedCountryOptions.map((country) => <option key={country.id} value={country.id}>{country.label}</option>) : <option value="">尚無造訪紀錄</option>}</select></label>
         </div>
         {cityStats.length ? <div className="city-map-layout">
           <div className="city-stats-list">{cityStats.map(([city, count], index) => <article key={city}><span>{index + 1}</span><strong>{city}</strong><b>{count}<em>次</em></b></article>)}</div>
           <div className="country-city-map">
-            {statsCountryGeometry && cityMapPath && cityProjection ? <svg viewBox="0 0 800 420" role="img" aria-label={`${statsCountryName}城市造訪地圖`}>
-              <path d={cityMapPath(statsCountryGeometry) ?? ""} className="country-shape" />
-              {cityMarkers.map((marker) => {
-                const point = cityProjection([marker.longitude, marker.latitude]);
-                if (!point) return null;
-                const radius = 7 + Math.min(marker.count, 6) * 2.5;
-                return <g key={marker.city} className="city-marker" transform={`translate(${point[0]} ${point[1]})`}>
-                  <circle r={radius} />
-                  <text y={-radius - 8}>{marker.city} · {marker.count}次</text>
-                </g>;
-              })}
+            {statsCountryGeometry && cityMapPath && cityProjection ? <svg className={cityMapZoom > 1 ? "can-pan" : ""} viewBox="0 0 800 420" role="img" aria-label={`${statsCountryName}城市造訪地圖`} onPointerDown={startCityPan} onPointerMove={moveCityPan} onPointerUp={stopCityPan} onPointerCancel={stopCityPan}>
+              <g style={{ transform: `translate(${cityMapPan.x}px, ${cityMapPan.y}px) scale(${cityMapZoom})`, transformOrigin: "center" }}>
+                <path d={cityMapPath(statsCountryGeometry) ?? ""} className="country-shape" />
+                {cityMarkers.map((marker) => {
+                  const point = cityProjection([marker.longitude, marker.latitude]);
+                  if (!point) return null;
+                  const radius = 7 + Math.min(marker.count, 6) * 2.5;
+                  return <g key={marker.city} className="city-marker" transform={`translate(${point[0]} ${point[1]})`}>
+                    <circle r={radius} />
+                    <text y={-radius - 8}>{marker.city} · {marker.count}次</text>
+                  </g>;
+                })}
+              </g>
             </svg> : <div className="city-map-unavailable">這個國家的地圖輪廓暫時無法顯示，左側城市統計仍可正常使用。</div>}
+            <div className="city-map-zoom"><button aria-label="放大城市地圖" onClick={() => changeCityZoom(cityMapZoom + .35)}>＋</button><button aria-label="縮小城市地圖" onClick={() => changeCityZoom(cityMapZoom - .35)}>−</button><button aria-label="重設城市地圖位置" onClick={() => { setCityMapZoom(1); setCityMapPan({ x: 0, y: 0 }); }}>↺</button></div>
             {!cityMapConsent && <div className="city-map-consent"><strong>顯示城市位置</strong><p>定位時只會將「城市＋國家」傳給 OpenStreetMap，不包含姓名、Email、日期、備註或其他旅行內容。</p><button type="button" onClick={enableCityMap}>同意並顯示城市圓點</button></div>}
             {cityMapLoading && <span className="city-map-loading">正在定位城市…</span>}
             <small className="map-attribution">城市位置資料 © OpenStreetMap contributors</small>
