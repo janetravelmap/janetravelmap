@@ -1,24 +1,24 @@
 "use client";
 
 import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { geoNaturalEarth1, geoPath } from "d3-geo";
+import { geoMercator, geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import type { GeometryCollection, Topology } from "topojson-specification";
-import worldData from "world-atlas/countries-110m.json";
-import isoCodeRows from "i18n-iso-countries/codes.json";
+import worldData from "world-atlas/countries-50m.json";
+import { canonicalCountryCount, countryNameById, countryOptions } from "./countries";
 
 type Trip = { id: number; country: string; countryId?: string; city: string; date: string; note: string; color: string };
 type Account = { displayName: string; email: string; theme: string; mapColor: string };
 
 const starterTrips: Trip[] = [];
 const storageKey = "janes-travel-footprints-v2";
+const visitorStorageKey = "janetravelmap-anonymous-visitor";
+const cityMapConsentKey = "janetravelmap-city-map-consent";
 const currentYear = new Date().getFullYear();
 const travelYears = Array.from({ length: currentYear - 1899 }, (_, index) => String(currentYear - index));
 const travelMonths = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
 
-const regionNames = new Intl.DisplayNames(["zh-TW"], { type: "region" });
 const specialZhNames: Record<string, string> = { "N. Cyprus": "北賽普勒斯", Somaliland: "索馬利蘭", Kosovo: "科索沃" };
-const alpha2ByNumeric = new Map(isoCodeRows.map((row) => [row[2], row[0]]));
 
 const topology = worldData as unknown as Topology;
 const worldCountries = feature(topology, topology.objects.countries as GeometryCollection).features
@@ -26,11 +26,7 @@ const worldCountries = feature(topology, topology.objects.countries as GeometryC
   .map((country) => ({
     id: String(country.id).padStart(3, "0"),
     name: String(country.properties?.name ?? ""),
-    label: (() => {
-      const englishName = String(country.properties?.name ?? "");
-      const alpha2 = alpha2ByNumeric.get(String(country.id).padStart(3, "0"));
-      return (alpha2 ? regionNames.of(alpha2) : undefined) ?? specialZhNames[englishName] ?? englishName;
-    })(),
+    label: countryNameById.get(String(country.id).padStart(3, "0")) ?? specialZhNames[String(country.properties?.name ?? "")] ?? String(country.properties?.name ?? ""),
     geometry: country,
   })).sort((a, b) => a.label.localeCompare(b.label, "zh-Hant"));
 
@@ -39,10 +35,12 @@ const mapPath = geoPath(projection);
 
 function resolveCountryId(countryName: string) {
   const normalized = countryName.trim().toLowerCase();
-  return worldCountries.find((country) =>
-    country.label.toLowerCase() === normalized || country.name.toLowerCase() === normalized
+  return countryOptions.find((country) => country.label.toLowerCase() === normalized)?.id ?? worldCountries.find((country) =>
+    country.name.toLowerCase() === normalized
   )?.id;
 }
+
+type CityMarker = { city: string; count: number; longitude: number; latitude: number };
 
 export default function Home() {
   const [trips, setTrips] = useState<Trip[]>(() => {
@@ -73,10 +71,30 @@ export default function Home() {
   const [recordYear, setRecordYear] = useState("all");
   const [recordCountryId, setRecordCountryId] = useState("all");
   const [visibleRecordCount, setVisibleRecordCount] = useState(12);
+  const [cityMarkers, setCityMarkers] = useState<CityMarker[]>([]);
+  const [cityMapLoading, setCityMapLoading] = useState(false);
+  const [cityMapConsent, setCityMapConsent] = useState(() =>
+    typeof window !== "undefined" && localStorage.getItem(cityMapConsentKey) === "yes"
+  );
   const dragStart = useRef<{ pointerX: number; pointerY: number; panX: number; panY: number } | null>(null);
+
+  function trackAnonymousEvent(event: "visit" | "start" | "convert") {
+    let visitorId = localStorage.getItem(visitorStorageKey);
+    if (!visitorId) {
+      visitorId = crypto.randomUUID();
+      localStorage.setItem(visitorStorageKey, visitorId);
+    }
+    void fetch("/api/analytics", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ visitorId, event }),
+      keepalive: true,
+    }).catch(() => undefined);
+  }
 
   useEffect(() => {
     let active = true;
+    trackAnonymousEvent("visit");
     async function loadCloudTrips() {
       try {
         const response = await fetch("/api/trips", { cache: "no-store" });
@@ -85,6 +103,7 @@ export default function Home() {
         const data = await response.json() as { trips: Trip[]; user: Account };
         if (!active) return;
         setAccount(data.user);
+        trackAnonymousEvent("convert");
         if (data.trips.length) setTrips(data.trips);
         else {
           let local: Trip[] = [];
@@ -108,16 +127,21 @@ export default function Home() {
     .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id), [trips]);
   const countries = useMemo(() => new Set(trips.map((trip) => trip.country.trim())).size, [trips]);
   const visitedIds = useMemo(() => new Set(trips.map((trip) => trip.countryId).filter(Boolean)), [trips]);
-  const visitedCountryOptions = useMemo(() => worldCountries.filter((country) => visitedIds.has(country.id)), [visitedIds]);
+  const visitedCountryOptions = useMemo(() => countryOptions.filter((country) => visitedIds.has(country.id)), [visitedIds]);
   const activeStatsCountryId = statsCountryId || visitedCountryOptions[0]?.id || "";
   const cityStats = useMemo(() => {
     const counts = new Map<string, number>();
     trips.filter((trip) => trip.countryId === activeStatsCountryId).forEach((trip) => {
-      trip.city.split(/[・、,，/]/).map((city) => city.trim()).filter(Boolean).forEach((city) => counts.set(city, (counts.get(city) ?? 0) + 1));
+      trip.city.split(/[・、,，/／]/).map((city) => city.trim()).filter(Boolean).forEach((city) => counts.set(city, (counts.get(city) ?? 0) + 1));
     });
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-Hant"));
   }, [trips, activeStatsCountryId]);
-  const statsCountryName = worldCountries.find((country) => country.id === activeStatsCountryId)?.label;
+  const statsCountryName = countryNameById.get(activeStatsCountryId);
+  const statsCountryGeometry = worldCountries.find((country) => country.id === activeStatsCountryId)?.geometry;
+  const cityProjection = useMemo(() => statsCountryGeometry
+    ? geoMercator().fitExtent([[42, 30], [758, 390]], statsCountryGeometry)
+    : null, [statsCountryGeometry]);
+  const cityMapPath = useMemo(() => cityProjection ? geoPath(cityProjection) : null, [cityProjection]);
   const recordYears = useMemo(() => [...new Set(trips.map((trip) => trip.date.slice(0, 4)))].filter(Boolean).sort((a, b) => b.localeCompare(a)), [trips]);
   const expandedRecords = showAllRecords;
   const archiveRecords = useMemo(() => filtered.filter((trip) =>
@@ -126,11 +150,56 @@ export default function Home() {
   ), [filtered, recordYear, recordCountryId]);
   const displayedRecords = expandedRecords ? archiveRecords.slice(0, visibleRecordCount) : filtered.slice(0, 8);
 
+  useEffect(() => {
+    let cancelled = false;
+    const cacheKey = "janetravelmap-city-coordinates-v1";
+    let cache: Record<string, { longitude: number; latitude: number }> = {};
+    try { cache = JSON.parse(localStorage.getItem(cacheKey) ?? "{}"); } catch { cache = {}; }
+
+    async function loadMarkers() {
+      if (!cityMapConsent || !statsCountryName || !cityStats.length) { setCityMarkers([]); return; }
+      setCityMapLoading(true);
+      const markers: CityMarker[] = [];
+      for (const [city, count] of cityStats) {
+        const key = `${activeStatsCountryId}:${city}`;
+        let coordinates = cache[key];
+        if (!coordinates) {
+          try {
+            const query = new URLSearchParams({ q: `${city}, ${statsCountryName}`, format: "jsonv2", limit: "1" });
+            const response = await fetch(`https://nominatim.openstreetmap.org/search?${query}`);
+            const [result] = response.ok ? await response.json() as Array<{ lon: string; lat: string }> : [];
+            if (result) {
+              coordinates = { longitude: Number(result.lon), latitude: Number(result.lat) };
+              cache[key] = coordinates;
+              localStorage.setItem(cacheKey, JSON.stringify(cache));
+            }
+          } catch {
+            coordinates = undefined;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 1100));
+        }
+        if (cancelled) return;
+        if (coordinates) markers.push({ city, count, ...coordinates });
+      }
+      if (!cancelled) {
+        setCityMarkers(markers);
+        setCityMapLoading(false);
+      }
+    }
+    void loadMarkers();
+    return () => { cancelled = true; };
+  }, [activeStatsCountryId, cityMapConsent, cityStats, statsCountryName]);
+
+  function enableCityMap() {
+    localStorage.setItem(cityMapConsentKey, "yes");
+    setCityMapConsent(true);
+  }
+
   async function saveTrip(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const countryId = String(data.get("countryId"));
-    const countryName = worldCountries.find((item) => item.id === countryId)?.label ?? "未知國家";
+    const countryName = countryNameById.get(countryId) ?? "未知國家";
     const trip: Trip = {
       id: editingTrip?.id ?? 0, country: countryName, countryId, city: String(data.get("city")),
       date: `${String(data.get("year"))}.${String(data.get("month"))}`, note: String(data.get("note")), color: "#147fe5",
@@ -226,7 +295,11 @@ export default function Home() {
   }
 
   function openNewTrip() {
-    if (!account) { window.location.href = "/signin-with-chatgpt?return_to=%2F"; return; }
+    if (!account) {
+      trackAnonymousEvent("start");
+      window.location.href = "/signin-with-chatgpt?return_to=%2F";
+      return;
+    }
     setEditingTrip(null);
     setModalOpen(true);
   }
@@ -275,7 +348,7 @@ export default function Home() {
           <p className="eyebrow">MY TRAVEL ATLAS · 2026</p>
           <h1>{account?.displayName || "我的"}的<br />旅行足跡</h1>
           <p className="subtitle">把走過的世界，收藏成自己的故事</p>
-          <div className="stats" id="stats"><div><strong>{countries}</strong><span>已造訪國家</span></div><i /><div><strong>{Math.max(0, worldCountries.length - countries)}</strong><span>尚未造訪國家</span></div></div>
+          <div className="stats" id="stats"><div><strong>{countries}</strong><span>已造訪國家</span></div><i /><div><strong>{Math.max(0, canonicalCountryCount - countries)}</strong><span>尚未造訪國家</span></div></div>
           <button className="primary" onClick={openNewTrip}><span>＋</span> 新增旅行</button>
           <div className="route-line"><span>●</span><i /><b>✈</b></div>
           {syncError && <p className="sync-error" role="alert">{syncError}</p>}
@@ -315,7 +388,26 @@ export default function Home() {
         <div className="travel-stats-head"><div><p>TRAVEL STATISTICS</p><h2>旅遊統計</h2><span>選擇國家，看看去過哪些城市與次數</span></div>
           <label>查看國家<select value={activeStatsCountryId} onChange={(event) => setStatsCountryId(event.target.value)} disabled={!visitedCountryOptions.length}>{visitedCountryOptions.length ? visitedCountryOptions.map((country) => <option key={country.id} value={country.id}>{country.label}</option>) : <option value="">尚無造訪紀錄</option>}</select></label>
         </div>
-        {cityStats.length ? <div className="city-stats-grid">{cityStats.map(([city, count], index) => <article key={city}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{city}</strong><small>{statsCountryName}</small></div><b>{count}<em>次</em></b></article>)}</div> : <div className="stats-empty">新增旅行後，就能在這裡查看每個國家去過的城市與次數。</div>}
+        {cityStats.length ? <div className="city-map-layout">
+          <div className="city-stats-list">{cityStats.map(([city, count], index) => <article key={city}><span>{index + 1}</span><strong>{city}</strong><b>{count}<em>次</em></b></article>)}</div>
+          <div className="country-city-map">
+            {statsCountryGeometry && cityMapPath && cityProjection ? <svg viewBox="0 0 800 420" role="img" aria-label={`${statsCountryName}城市造訪地圖`}>
+              <path d={cityMapPath(statsCountryGeometry) ?? ""} className="country-shape" />
+              {cityMarkers.map((marker) => {
+                const point = cityProjection([marker.longitude, marker.latitude]);
+                if (!point) return null;
+                const radius = 7 + Math.min(marker.count, 6) * 2.5;
+                return <g key={marker.city} className="city-marker" transform={`translate(${point[0]} ${point[1]})`}>
+                  <circle r={radius} />
+                  <text y={-radius - 8}>{marker.city} · {marker.count}次</text>
+                </g>;
+              })}
+            </svg> : <div className="city-map-unavailable">這個國家的地圖輪廓暫時無法顯示，左側城市統計仍可正常使用。</div>}
+            {!cityMapConsent && <div className="city-map-consent"><strong>顯示城市位置</strong><p>定位時只會將「城市＋國家」傳給 OpenStreetMap，不包含姓名、Email、日期、備註或其他旅行內容。</p><button type="button" onClick={enableCityMap}>同意並顯示城市圓點</button></div>}
+            {cityMapLoading && <span className="city-map-loading">正在定位城市…</span>}
+            <small className="map-attribution">城市位置資料 © OpenStreetMap contributors</small>
+          </div>
+        </div> : <div className="stats-empty">新增旅行後，就能在這裡查看每個國家去過的城市與次數。</div>}
       </section>
 
       <aside className="ad-strip" aria-label="廣告版位">
@@ -326,7 +418,7 @@ export default function Home() {
 
       {modalOpen && <div className="modal-backdrop" onMouseDown={() => { setModalOpen(false); setEditingTrip(null); }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <button className="close" onClick={() => { setModalOpen(false); setEditingTrip(null); }} aria-label="關閉">×</button><p className="eyebrow">{editingTrip ? "EDIT FOOTPRINT" : "NEW FOOTPRINT"}</p><h2>{editingTrip ? "編輯旅行紀錄" : "新增一段旅行"}</h2><p>{editingTrip ? "修改後，地圖與統計會同步更新。" : "把國家、城市與最想記住的片刻收藏起來。"}</p>
-        <form key={editingTrip?.id ?? "new"} onSubmit={saveTrip}><label>國家<select name="countryId" required defaultValue={editingTrip?.countryId ?? resolveCountryId(editingTrip?.country ?? "") ?? ""}><option value="" disabled>請選擇國家</option>{worldCountries.map((country) => <option key={country.id} value={country.id}>{country.label}</option>)}</select></label><label>城市（可輸入多個）<input name="city" placeholder="例如：大阪／京都" required defaultValue={editingTrip?.city ?? ""} /></label><div className="date-fields"><label>旅行年份<select name="year" required defaultValue={editingTrip?.date.slice(0, 4) ?? String(currentYear)}>{travelYears.map((year) => <option key={year} value={year}>{year} 年</option>)}</select></label><label>旅行月份<select name="month" required defaultValue={editingTrip?.date.slice(5, 7) || "01"}>{travelMonths.map((month) => <option key={month} value={month}>{Number(month)} 月</option>)}</select></label></div><label>旅行回憶<textarea name="note" placeholder="這趟旅程最難忘的是……" rows={3} defaultValue={editingTrip?.note ?? ""}/></label><button className="primary" type="submit">{editingTrip ? "儲存修改" : "儲存旅行足跡"}</button></form>
+        <form key={editingTrip?.id ?? "new"} onSubmit={saveTrip}><label>國家<select name="countryId" required defaultValue={editingTrip?.countryId ?? resolveCountryId(editingTrip?.country ?? "") ?? ""}><option value="" disabled>請選擇國家</option>{countryOptions.map((country) => <option key={country.id} value={country.id}>{country.label}</option>)}</select></label><label>城市（可輸入多個）<input name="city" placeholder="例如：大阪／京都" required defaultValue={editingTrip?.city ?? ""} /></label><div className="date-fields"><label>旅行年份<select name="year" required defaultValue={editingTrip?.date.slice(0, 4) ?? String(currentYear)}>{travelYears.map((year) => <option key={year} value={year}>{year} 年</option>)}</select></label><label>旅行月份<select name="month" required defaultValue={editingTrip?.date.slice(5, 7) || "01"}>{travelMonths.map((month) => <option key={month} value={month}>{Number(month)} 月</option>)}</select></label></div><label>旅行回憶<textarea name="note" placeholder="這趟旅程最難忘的是……" rows={3} defaultValue={editingTrip?.note ?? ""}/></label><button className="primary" type="submit">{editingTrip ? "儲存修改" : "儲存旅行足跡"}</button></form>
         {editingTrip && <button className="delete-trip" type="button" onClick={deleteTrip}>刪除這筆旅行紀錄</button>}
       </div></div>}
     </main>
