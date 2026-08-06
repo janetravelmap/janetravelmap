@@ -5,19 +5,24 @@ AF AL DZ AD AO AG AR AM AU AT AZ BS BH BD BB BY BE BZ BJ BT BO BA BW BR BN BG BF
 `.trim().split(/\s+/);
 
 const numericByAlpha2 = new Map(isoCodeRows.map((row) => [row[0], row[2]]));
-const regionNames = new Intl.DisplayNames(["zh-TW"], { type: "region" });
-const nameOverrides: Record<string, string> = {
-  TW: "台灣",
-  PS: "巴勒斯坦",
-  VA: "梵蒂岡",
-  XK: "科索沃",
+import type { Locale } from "./i18n";
+
+const nameOverrides: Record<Locale, Record<string, string>> = {
+  "zh-TW": { TW: "台灣", PS: "巴勒斯坦", VA: "梵蒂岡", XK: "科索沃" },
+  en: { TW: "Taiwan", PS: "Palestine", VA: "Vatican City", XK: "Kosovo" },
+  ja: { TW: "台湾", PS: "パレスチナ", VA: "バチカン市国", XK: "コソボ" },
 };
 
-export const countryOptions = [...sovereignCodes, "XK"].map((alpha2) => ({
-  alpha2,
-  id: alpha2 === "XK" ? "383" : numericByAlpha2.get(alpha2) ?? alpha2,
-  label: nameOverrides[alpha2] ?? regionNames.of(alpha2) ?? alpha2,
-})).sort((a, b) => a.label.localeCompare(b.label, "zh-Hant"));
+export function getCountryOptions(locale: Locale) {
+  const regionNames = new Intl.DisplayNames([locale], { type: "region" });
+  return [...sovereignCodes, "XK"].map((alpha2) => ({
+    alpha2,
+    id: alpha2 === "XK" ? "383" : numericByAlpha2.get(alpha2) ?? alpha2,
+    label: nameOverrides[locale][alpha2] ?? regionNames.of(alpha2) ?? alpha2,
+  })).sort((a, b) => a.label.localeCompare(b.label, locale));
+}
+
+export const countryOptions = getCountryOptions("zh-TW");
 
 export const countryNameById = new Map(countryOptions.map((country) => [country.id, country.label]));
 export const canonicalCountryCount = countryOptions.length;
