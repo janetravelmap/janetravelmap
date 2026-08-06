@@ -6,7 +6,8 @@ import { feature } from "topojson-client";
 import type { Feature, Geometry, Polygon } from "geojson";
 import type { GeometryCollection, Topology } from "topojson-specification";
 import worldData from "world-atlas/countries-50m.json";
-import { canonicalCountryCount, countryNameById, countryOptions } from "./countries";
+import { canonicalCountryCount, countryNameById, countryOptions, getCountryOptions } from "./countries";
+import { copy, detectLocale, localeLabels, localeStorageKey, type Locale } from "./i18n";
 
 type Trip = { id: number; country: string; countryId?: string; city: string; date: string; note: string; color: string };
 type Account = { displayName: string; email: string; theme: string; mapColor: string };
@@ -54,6 +55,7 @@ function largestPolygon(country: Feature<Geometry>) {
 }
 
 export default function Home() {
+  const [locale, setLocale] = useState<Locale>(detectLocale);
   const [trips, setTrips] = useState<Trip[]>(() => {
     if (typeof window === "undefined") return starterTrips;
     const saved = localStorage.getItem(storageKey);
@@ -91,6 +93,20 @@ export default function Home() {
   const [cityMapPan, setCityMapPan] = useState({ x: 0, y: 0 });
   const dragStart = useRef<{ pointerX: number; pointerY: number; panX: number; panY: number } | null>(null);
   const cityDragStart = useRef<{ pointerX: number; pointerY: number; panX: number; panY: number } | null>(null);
+  const t = copy[locale];
+  const heroOwner = `${account?.displayName || t.heroName}${locale === "en" ? "’s" : locale === "ja" ? "の" : "的"}`;
+  const localizedCountryOptions = useMemo(() => getCountryOptions(locale), [locale]);
+  const localizedCountryNameById = useMemo(() => new Map(localizedCountryOptions.map((country) => [country.id, country.label])), [localizedCountryOptions]);
+
+  function changeLocale(nextLocale: Locale) {
+    setLocale(nextLocale);
+    localStorage.setItem(localeStorageKey, nextLocale);
+  }
+
+  useEffect(() => {
+    document.documentElement.lang = locale === "zh-TW" ? "zh-Hant" : locale;
+    document.title = locale === "en" ? "My Travel Footprints" : locale === "ja" ? "わたしの旅の足あと" : "Jane 的旅行足跡";
+  }, [locale]);
 
   function trackAnonymousEvent(event: "visit" | "start" | "convert") {
     let visitorId = localStorage.getItem(visitorStorageKey);
@@ -141,7 +157,7 @@ export default function Home() {
     .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id), [trips]);
   const countries = useMemo(() => new Set(trips.map((trip) => trip.country.trim())).size, [trips]);
   const visitedIds = useMemo(() => new Set(trips.map((trip) => trip.countryId).filter(Boolean)), [trips]);
-  const visitedCountryOptions = useMemo(() => countryOptions.filter((country) => visitedIds.has(country.id)), [visitedIds]);
+  const visitedCountryOptions = useMemo(() => localizedCountryOptions.filter((country) => visitedIds.has(country.id)), [localizedCountryOptions, visitedIds]);
   const activeStatsCountryId = statsCountryId || visitedCountryOptions[0]?.id || "";
   const cityStats = useMemo(() => {
     const counts = new Map<string, number>();
@@ -150,7 +166,8 @@ export default function Home() {
     });
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-Hant"));
   }, [trips, activeStatsCountryId]);
-  const statsCountryName = countryNameById.get(activeStatsCountryId);
+  const statsCountryName = localizedCountryNameById.get(activeStatsCountryId);
+  const geocodingCountryName = worldCountries.find((country) => country.id === activeStatsCountryId)?.name;
   const rawStatsCountryGeometry = worldCountries.find((country) => country.id === activeStatsCountryId)?.geometry as Feature<Geometry> | undefined;
   const statsCountryGeometry = useMemo(() =>
     rawStatsCountryGeometry && activeStatsCountryId === "840"
@@ -176,7 +193,7 @@ export default function Home() {
     try { cache = JSON.parse(localStorage.getItem(cacheKey) ?? "{}"); } catch { cache = {}; }
 
     async function loadMarkers() {
-      if (!cityMapConsent || !statsCountryName || !cityStats.length) { setCityMarkers([]); return; }
+      if (!cityMapConsent || !geocodingCountryName || !cityStats.length) { setCityMarkers([]); return; }
       setCityMapLoading(true);
       const markers: CityMarker[] = [];
       for (const [city, count] of cityStats) {
@@ -186,7 +203,7 @@ export default function Home() {
           const cityQueries = [...new Set([city, city.replace(/島$/, "")])].filter(Boolean);
           for (const cityQuery of cityQueries) {
             try {
-              const query = new URLSearchParams({ q: `${cityQuery}, ${statsCountryName}`, format: "jsonv2", limit: "1" });
+              const query = new URLSearchParams({ q: `${cityQuery}, ${geocodingCountryName}`, format: "jsonv2", limit: "1" });
               const response = await fetch(`https://nominatim.openstreetmap.org/search?${query}`);
               const [result] = response.ok ? await response.json() as Array<{ lon: string; lat: string }> : [];
               if (result) {
@@ -211,7 +228,7 @@ export default function Home() {
     }
     void loadMarkers();
     return () => { cancelled = true; };
-  }, [activeStatsCountryId, cityMapConsent, cityStats, statsCountryName]);
+  }, [activeStatsCountryId, cityMapConsent, cityStats, geocodingCountryName]);
 
   function enableCityMap() {
     localStorage.setItem(cityMapConsentKey, "yes");
@@ -222,7 +239,7 @@ export default function Home() {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const countryId = String(data.get("countryId"));
-    const countryName = countryNameById.get(countryId) ?? "未知國家";
+    const countryName = countryNameById.get(countryId) ?? t.unknownCountry;
     const trip: Trip = {
       id: editingTrip?.id ?? 0, country: countryName, countryId, city: String(data.get("city")),
       date: `${String(data.get("year"))}.${String(data.get("month"))}`, note: String(data.get("note")), color: "#147fe5",
@@ -264,7 +281,7 @@ export default function Home() {
 
   async function deleteTrip() {
     if (!editingTrip) return;
-    if (!window.confirm(`確定要刪除「${editingTrip.country} · ${editingTrip.city}」嗎？刪除後無法復原。`)) return;
+    if (!window.confirm(t.deleteConfirm(`${localizedCountryNameById.get(editingTrip.countryId ?? "") ?? editingTrip.country} · ${editingTrip.city}`))) return;
     try {
       setSyncError("");
       const response = await fetch("/api/trips", {
@@ -283,7 +300,7 @@ export default function Home() {
   }
 
   async function changeDisplayName() {
-    const nextName = window.prompt("想在旅行足跡上顯示什麼名稱？", account?.displayName ?? "");
+    const nextName = window.prompt(t.namePrompt, account?.displayName ?? "");
     if (!nextName?.trim()) return;
     try {
       const response = await fetch("/api/trips", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ profileName: nextName }) });
@@ -387,60 +404,63 @@ export default function Home() {
   return (
     <main data-theme={account?.theme || "blue"} style={{ "--visited-color": account?.mapColor || "#147fe5" } as CSSProperties}>
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="回首頁"><span className="brand-mark">◎</span><span>{account ? `${account.displayName} 的旅行足跡` : "我的旅行足跡"}</span></a>
-        <nav><a className="active" href="#map">地圖總覽</a><a href="#footprints">足跡紀錄</a><a href="#travel-stats">旅遊統計</a><a href="#stats">國家統計</a></nav>
-        {account ? <div className="profile"><span className="cloud-state">☁ {cloudReady ? "已同步" : "同步中"}</span><label className="theme-picker" title="頁面顏色"><span>●</span><select value={account.theme || "blue"} onChange={(event) => changeTheme(event.target.value)} aria-label="選擇頁面顏色"><option value="blue">海洋藍</option><option value="teal">薄荷綠</option><option value="rose">珊瑚粉</option><option value="violet">薰衣紫</option><option value="amber">暖陽橘</option></select></label><label className="map-color-picker" title="已去過國家的地圖顏色"><span>地圖</span><input type="color" value={account.mapColor || "#147fe5"} onChange={(event) => changeMapColor(event.target.value)} aria-label="選擇已去過國家的地圖顏色" /></label><span className="avatar">{account.displayName.slice(0, 1).toUpperCase()}</span><button className="profile-name" onClick={changeDisplayName}>{account.displayName} ✎</button><a className="signout" href="/auth/logout?return_to=%2F">登出</a></div> : <a className="signin-button" href="/auth/google?return_to=%2F">使用 Google 登入建立足跡</a>}
+        <a className="brand" href="#top" aria-label={t.home}><span className="brand-mark">◎</span><span>{account ? `${account.displayName}${t.possessive}` : t.myFootprints}</span></a>
+        <nav><a className="active" href="#map">{t.mapOverview}</a><a href="#footprints">{t.records}</a><a href="#travel-stats">{t.travelStats}</a><a href="#stats">{t.countryStats}</a></nav>
+        <div className="topbar-actions">
+          <div className="language-switcher" aria-label="Language">{(["zh-TW", "en", "ja"] as Locale[]).map((item) => <button key={item} type="button" className={locale === item ? "active" : ""} lang={item} aria-pressed={locale === item} onClick={() => changeLocale(item)}>{localeLabels[item]}</button>)}</div>
+          {account ? <div className="profile"><span className="cloud-state">☁ {cloudReady ? t.synced : t.syncing}</span><label className="theme-picker" title={t.pageColor}><span>●</span><select value={account.theme || "blue"} onChange={(event) => changeTheme(event.target.value)} aria-label={t.pageColor}><option value="blue">{t.themes[0]}</option><option value="teal">{t.themes[1]}</option><option value="rose">{t.themes[2]}</option><option value="violet">{t.themes[3]}</option><option value="amber">{t.themes[4]}</option></select></label><label className="map-color-picker" title={t.mapColor}><span>{t.map}</span><input type="color" value={account.mapColor || "#147fe5"} onChange={(event) => changeMapColor(event.target.value)} aria-label={t.mapColor} /></label><span className="avatar">{account.displayName.slice(0, 1).toUpperCase()}</span><button className="profile-name" onClick={changeDisplayName}>{account.displayName} ✎</button><a className="signout" href="/auth/logout?return_to=%2F">{t.signOut}</a></div> : <a className="signin-button" href="/auth/google?return_to=%2F">{t.signIn}</a>}
+        </div>
       </header>
 
       <section id="top" className="hero">
         <div className="intro">
           <p className="eyebrow">MY TRAVEL ATLAS · 2026</p>
-          <h1>{account?.displayName || "我的"}的<br />旅行足跡</h1>
-          <p className="subtitle">把走過的世界，收藏成自己的故事</p>
-          <div className="stats" id="stats"><div><strong>{countries}</strong><span>已造訪國家</span></div><i /><div><strong>{Math.max(0, canonicalCountryCount - countries)}</strong><span>尚未造訪國家</span></div></div>
-          <button className="primary" onClick={openNewTrip}><span>＋</span> 新增旅行</button>
+          <h1>{heroOwner}<br />{locale === "en" ? "Travel Footprints" : locale === "ja" ? "旅の足あと" : "旅行足跡"}</h1>
+          <p className="subtitle">{t.subtitle}</p>
+          <div className="stats" id="stats"><div><strong>{countries}</strong><span>{t.visitedCountries}</span></div><i /><div><strong>{Math.max(0, canonicalCountryCount - countries)}</strong><span>{t.unvisitedCountries}</span></div></div>
+          <button className="primary" onClick={openNewTrip}><span>＋</span> {t.addTrip}</button>
           <div className="route-line"><span>●</span><i /><b>✈</b></div>
           {syncError && <p className="sync-error" role="alert">{syncError}</p>}
         </div>
 
         <div className="map-panel" id="map">
           <div className="map-wash" />
-          <svg className={`world-map ${mapZoom > 1 ? "can-pan" : ""}`} viewBox="0 0 820 430" role="img" aria-label="依照實際國界繪製的世界地圖" onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan}>
+          <svg className={`world-map ${mapZoom > 1 ? "can-pan" : ""}`} viewBox="0 0 820 430" role="img" aria-label={t.worldMap} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan}>
             <g className="map-countries" style={{ transform: `translate(${mapPan.x}px, ${mapPan.y}px) scale(${mapZoom})`, transformOrigin: "center" }}>
               {worldCountries.map((country) => <path key={country.id} d={mapPath(country.geometry) ?? ""} className={visitedIds.has(country.id) ? "visited" : "land"}>
-                <title>{country.label}{visitedIds.has(country.id) ? "－已造訪" : ""}</title>
+                <title>{localizedCountryNameById.get(country.id) ?? country.name}{visitedIds.has(country.id) ? t.visitedSuffix : ""}</title>
               </path>)}
             </g>
           </svg>
-          <div className="zoom"><button aria-label="放大地圖" onClick={() => changeZoom(mapZoom + .25)}>＋</button><button aria-label="縮小地圖" onClick={() => changeZoom(mapZoom - .25)}>−</button><button aria-label="重設地圖位置" onClick={() => { setMapZoom(1); setMapPan({ x: 0, y: 0 }); }}>↺</button></div>
-          <div className="legend"><span><i className="dot visited-dot"/>已造訪</span><span><i className="dot unexplored-dot"/>尚未造訪</span></div>
+          <div className="zoom"><button aria-label={t.zoomIn} onClick={() => changeZoom(mapZoom + .25)}>＋</button><button aria-label={t.zoomOut} onClick={() => changeZoom(mapZoom - .25)}>−</button><button aria-label={t.resetMap} onClick={() => { setMapZoom(1); setMapPan({ x: 0, y: 0 }); }}>↺</button></div>
+          <div className="legend"><span><i className="dot visited-dot"/>{t.visited}</span><span><i className="dot unexplored-dot"/>{t.unvisited}</span></div>
         </div>
       </section>
 
       <section className="content" id="footprints">
-        <div className="section-heading"><div><p>TRAVEL STORIES</p><h2>我的足跡紀錄</h2></div><span>{expandedRecords ? archiveRecords.length : filtered.length} 個收藏</span></div>
-        {expandedRecords && <div className="record-filters"><label>年份<select value={recordYear} onChange={(event) => { setRecordYear(event.target.value); setVisibleRecordCount(12); }}><option value="all">全部年份</option>{recordYears.map((year) => <option key={year} value={year}>{year} 年</option>)}</select></label><label>國家<select value={recordCountryId} onChange={(event) => { setRecordCountryId(event.target.value); setVisibleRecordCount(12); }}><option value="all">全部國家</option>{visitedCountryOptions.map((country) => <option key={country.id} value={country.id}>{country.label}</option>)}</select></label></div>}
+        <div className="section-heading"><div><p>TRAVEL STORIES</p><h2>{t.stories}</h2></div><span>{expandedRecords ? archiveRecords.length : filtered.length} {t.collections}</span></div>
+        {expandedRecords && <div className="record-filters"><label>{t.year}<select value={recordYear} onChange={(event) => { setRecordYear(event.target.value); setVisibleRecordCount(12); }}><option value="all">{t.allYears}</option>{recordYears.map((year) => <option key={year} value={year}>{year} {t.yearSuffix}</option>)}</select></label><label>{t.country}<select value={recordCountryId} onChange={(event) => { setRecordCountryId(event.target.value); setVisibleRecordCount(12); }}><option value="all">{t.allCountries}</option>{visitedCountryOptions.map((country) => <option key={country.id} value={country.id}>{country.label}</option>)}</select></label></div>}
         <div className="cards">
           {displayedRecords.map((trip) => <button key={trip.id} className={`trip-card ${selected?.id === trip.id ? "selected" : ""}`} onClick={() => setSelected(trip)}>
             <span className="card-icon" style={{background: `${trip.color}18`, color: trip.color}}>⌖</span>
-            <span className="card-copy"><small>{trip.date}</small><strong>{trip.country}</strong><em>{trip.city}</em></span><span className="arrow">›</span>
+            <span className="card-copy"><small>{trip.date}</small><strong>{localizedCountryNameById.get(trip.countryId ?? "") ?? trip.country}</strong><em>{trip.city}</em></span><span className="arrow">›</span>
           </button>)}
-          {!displayedRecords.length && <div className="empty">{trips.length === 0 ? "還沒有旅行足跡，按「新增旅行」收藏第一個去過的國家吧！" : "找不到符合條件的足跡紀錄。"}</div>}
+          {!displayedRecords.length && <div className="empty">{trips.length === 0 ? t.noTrips : t.noMatches}</div>}
         </div>
-        {expandedRecords && archiveRecords.length > visibleRecordCount && <button className="records-action" onClick={() => setVisibleRecordCount((count) => count + 12)}>載入更多紀錄</button>}
-        {!expandedRecords && filtered.length > 8 && <button className="records-action" onClick={() => { setShowAllRecords(true); setVisibleRecordCount(12); }}>查看全部 {filtered.length} 筆紀錄</button>}
-        {showAllRecords && <button className="records-collapse" onClick={() => { setShowAllRecords(false); setRecordYear("all"); setRecordCountryId("all"); setVisibleRecordCount(12); }}>收起完整紀錄</button>}
-        {selected && <article className="memory"><div><span>精選旅行回憶</span><h3>{selected.country} · {selected.city}</h3><p>{selected.note || "這趟旅行還沒寫下故事，留一個位置給未來的回憶。"}</p><button className="edit-trip" onClick={() => openEditTrip(selected)}>✎ 編輯這筆紀錄</button></div><div className="memory-stamp">{selected.date}<br/><b>{account?.displayName?.toUpperCase() || "ME"}</b></div></article>}
+        {expandedRecords && archiveRecords.length > visibleRecordCount && <button className="records-action" onClick={() => setVisibleRecordCount((count) => count + 12)}>{t.loadMore}</button>}
+        {!expandedRecords && filtered.length > 8 && <button className="records-action" onClick={() => { setShowAllRecords(true); setVisibleRecordCount(12); }}>{t.viewAll} {filtered.length} {t.recordsUnit}</button>}
+        {showAllRecords && <button className="records-collapse" onClick={() => { setShowAllRecords(false); setRecordYear("all"); setRecordCountryId("all"); setVisibleRecordCount(12); }}>{t.collapse}</button>}
+        {selected && <article className="memory"><div><span>{t.featured}</span><h3>{localizedCountryNameById.get(selected.countryId ?? "") ?? selected.country} · {selected.city}</h3><p>{selected.note || t.noStory}</p><button className="edit-trip" onClick={() => openEditTrip(selected)}>✎ {t.editRecord}</button></div><div className="memory-stamp">{selected.date}<br/><b>{account?.displayName?.toUpperCase() || "ME"}</b></div></article>}
       </section>
 
       <section className="travel-stats" id="travel-stats">
-        <div className="travel-stats-head"><div><p>TRAVEL STATISTICS</p><h2>旅遊統計</h2><span>選擇國家，看看去過哪些城市與次數</span></div>
-          <label>查看國家<select value={activeStatsCountryId} onChange={(event) => { setStatsCountryId(event.target.value); setCityMapZoom(1); setCityMapPan({ x: 0, y: 0 }); }} disabled={!visitedCountryOptions.length}>{visitedCountryOptions.length ? visitedCountryOptions.map((country) => <option key={country.id} value={country.id}>{country.label}</option>) : <option value="">尚無造訪紀錄</option>}</select></label>
+        <div className="travel-stats-head"><div><p>TRAVEL STATISTICS</p><h2>{t.travelStats}</h2><span>{t.statsHelp}</span></div>
+          <label>{t.viewCountry}<select value={activeStatsCountryId} onChange={(event) => { setStatsCountryId(event.target.value); setCityMapZoom(1); setCityMapPan({ x: 0, y: 0 }); }} disabled={!visitedCountryOptions.length}>{visitedCountryOptions.length ? visitedCountryOptions.map((country) => <option key={country.id} value={country.id}>{country.label}</option>) : <option value="">{t.noVisits}</option>}</select></label>
         </div>
         {cityStats.length ? <div className="city-map-layout">
-          <div className="city-stats-list">{cityStats.map(([city, count], index) => <article key={city}><span>{index + 1}</span><strong>{city}</strong><b>{count}<em>次</em></b></article>)}</div>
+          <div className="city-stats-list">{cityStats.map(([city, count], index) => <article key={city}><span>{index + 1}</span><strong>{city}</strong><b>{count}<em>{t.times}</em></b></article>)}</div>
           <div className="country-city-map">
-            {statsCountryGeometry && cityMapPath && cityProjection ? <svg className={cityMapZoom > 1 ? "can-pan" : ""} viewBox="0 0 800 420" role="img" aria-label={`${statsCountryName}城市造訪地圖`} onPointerDown={startCityPan} onPointerMove={moveCityPan} onPointerUp={stopCityPan} onPointerCancel={stopCityPan}>
+            {statsCountryGeometry && cityMapPath && cityProjection ? <svg className={cityMapZoom > 1 ? "can-pan" : ""} viewBox="0 0 800 420" role="img" aria-label={t.cityMapLabel(statsCountryName ?? "")} onPointerDown={startCityPan} onPointerMove={moveCityPan} onPointerUp={stopCityPan} onPointerCancel={stopCityPan}>
               <g style={{ transform: `translate(${cityMapPan.x}px, ${cityMapPan.y}px) scale(${cityMapZoom})`, transformOrigin: "center" }}>
                 <path d={cityMapPath(statsCountryGeometry) ?? ""} className="country-shape" />
                 {cityMarkers.map((marker) => {
@@ -449,29 +469,29 @@ export default function Home() {
                   const radius = 7 + Math.min(marker.count, 6) * 2.5;
                   return <g key={marker.city} className="city-marker" transform={`translate(${point[0]} ${point[1]})`}>
                     <circle r={radius} />
-                    <text y={-radius - 8}>{marker.city} · {marker.count}次</text>
+                    <text y={-radius - 8}>{marker.city} · {marker.count}{t.times}</text>
                   </g>;
                 })}
               </g>
-            </svg> : <div className="city-map-unavailable">這個國家的地圖輪廓暫時無法顯示，左側城市統計仍可正常使用。</div>}
+            </svg> : <div className="city-map-unavailable">{t.cityMapUnavailable}</div>}
             <div className="city-map-zoom"><button aria-label="放大城市地圖" onClick={() => changeCityZoom(cityMapZoom + .35)}>＋</button><button aria-label="縮小城市地圖" onClick={() => changeCityZoom(cityMapZoom - .35)}>−</button><button aria-label="重設城市地圖位置" onClick={() => { setCityMapZoom(1); setCityMapPan({ x: 0, y: 0 }); }}>↺</button></div>
-            {!cityMapConsent && <div className="city-map-consent"><strong>顯示城市位置</strong><p>定位時只會將「城市＋國家」傳給 OpenStreetMap，不包含姓名、Email、日期、備註或其他旅行內容。</p><button type="button" onClick={enableCityMap}>同意並顯示城市圓點</button></div>}
-            {cityMapLoading && <span className="city-map-loading">正在定位城市…</span>}
+            {!cityMapConsent && <div className="city-map-consent"><strong>{t.showCities}</strong><p>{t.privacyNote}</p><button type="button" onClick={enableCityMap}>{t.consent}</button></div>}
+            {cityMapLoading && <span className="city-map-loading">{t.locating}</span>}
             <small className="map-attribution">城市位置資料 © OpenStreetMap contributors</small>
           </div>
-        </div> : <div className="stats-empty">新增旅行後，就能在這裡查看每個國家去過的城市與次數。</div>}
+        </div> : <div className="stats-empty">{t.statsEmpty}</div>}
       </section>
 
-      <aside className="ad-strip" aria-label="廣告版位">
-        <span>廣告</span><p>旅行好物與旅遊合作內容</p><small>此處將顯示精選廣告</small>
+      <aside className="ad-strip" aria-label={t.ad}>
+        <span>{t.ad}</span><p>{t.adTitle}</p><small>{t.adHint}</small>
       </aside>
 
-      <footer className="site-footer"><span>© 2026 旅行足跡</span><nav><a href="/about">關於網站</a><a href="/privacy">隱私權政策</a><a href="/terms">服務條款</a><a href="/contact">聯絡我們</a></nav></footer>
+      <footer className="site-footer"><span>© 2026 Jane Travel Map</span><nav><a href="/about">{t.about}</a><a href="/privacy">{t.privacy}</a><a href="/terms">{t.terms}</a><a href="/contact">{t.contact}</a></nav></footer>
 
       {modalOpen && <div className="modal-backdrop" onMouseDown={() => { setModalOpen(false); setEditingTrip(null); }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-        <button className="close" onClick={() => { setModalOpen(false); setEditingTrip(null); }} aria-label="關閉">×</button><p className="eyebrow">{editingTrip ? "EDIT FOOTPRINT" : "NEW FOOTPRINT"}</p><h2>{editingTrip ? "編輯旅行紀錄" : "新增一段旅行"}</h2><p>{editingTrip ? "修改後，地圖與統計會同步更新。" : "把國家、城市與最想記住的片刻收藏起來。"}</p>
-        <form key={editingTrip?.id ?? "new"} onSubmit={saveTrip}><label>國家<select name="countryId" required defaultValue={editingTrip?.countryId ?? resolveCountryId(editingTrip?.country ?? "") ?? ""}><option value="" disabled>請選擇國家</option>{countryOptions.map((country) => <option key={country.id} value={country.id}>{country.label}</option>)}</select></label><label>城市（可輸入多個）<input name="city" placeholder="例如：大阪／京都" required defaultValue={editingTrip?.city ?? ""} /></label><div className="date-fields"><label>旅行年份<select name="year" required defaultValue={editingTrip?.date.slice(0, 4) ?? String(currentYear)}>{travelYears.map((year) => <option key={year} value={year}>{year} 年</option>)}</select></label><label>旅行月份<select name="month" required defaultValue={editingTrip?.date.slice(5, 7) || "01"}>{travelMonths.map((month) => <option key={month} value={month}>{Number(month)} 月</option>)}</select></label></div><label>旅行回憶<textarea name="note" placeholder="這趟旅程最難忘的是……" rows={3} defaultValue={editingTrip?.note ?? ""}/></label><button className="primary" type="submit">{editingTrip ? "儲存修改" : "儲存旅行足跡"}</button></form>
-        {editingTrip && <button className="delete-trip" type="button" onClick={deleteTrip}>刪除這筆旅行紀錄</button>}
+        <button className="close" onClick={() => { setModalOpen(false); setEditingTrip(null); }} aria-label={t.close}>×</button><p className="eyebrow">{editingTrip ? "EDIT FOOTPRINT" : "NEW FOOTPRINT"}</p><h2>{editingTrip ? t.editFootprint : t.newFootprint}</h2><p>{editingTrip ? t.editHelp : t.newHelp}</p>
+        <form key={editingTrip?.id ?? "new"} onSubmit={saveTrip}><label>{t.country}<select name="countryId" required defaultValue={editingTrip?.countryId ?? resolveCountryId(editingTrip?.country ?? "") ?? ""}><option value="" disabled>{t.chooseCountry}</option>{localizedCountryOptions.map((country) => <option key={country.id} value={country.id}>{country.label}</option>)}</select></label><label>{t.cities}<input name="city" placeholder={t.cityExample} required defaultValue={editingTrip?.city ?? ""} /></label><div className="date-fields"><label>{t.travelYear}<select name="year" required defaultValue={editingTrip?.date.slice(0, 4) ?? String(currentYear)}>{travelYears.map((year) => <option key={year} value={year}>{year}{t.yearSuffix}</option>)}</select></label><label>{t.travelMonth}<select name="month" required defaultValue={editingTrip?.date.slice(5, 7) || "01"}>{travelMonths.map((month) => <option key={month} value={month}>{Number(month)}{t.monthSuffix}</option>)}</select></label></div><label>{t.memory}<textarea name="note" placeholder={t.memoryPlaceholder} rows={3} defaultValue={editingTrip?.note ?? ""}/></label><button className="primary" type="submit">{editingTrip ? t.saveEdit : t.saveTrip}</button></form>
+        {editingTrip && <button className="delete-trip" type="button" onClick={deleteTrip}>{t.deleteTrip}</button>}
       </div></div>}
     </main>
   );
