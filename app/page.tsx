@@ -482,6 +482,19 @@ export default function Home() {
         </div> : <div className="stats-empty">{t.statsEmpty}</div>}
       </section>
 
+      <section className="public-intro" aria-labelledby="public-intro-title">
+        <p className="eyebrow">HOW IT WORKS</p>
+        <h2 id="public-intro-title">{locale === "en" ? "Build your own travel footprint" : locale === "ja" ? "自分だけの旅の足あとを作ろう" : "建立自己的旅行足跡"}</h2>
+        <p className="public-intro-lead">{locale === "en" ? "Turn the countries, cities, dates, and memories from your journeys into a personal world map." : locale === "ja" ? "訪れた国や都市、時期、旅の思い出を、自分だけの世界地図に残せます。" : "把去過的國家、城市、月份與旅行回憶，整理成只屬於自己的世界地圖。"}</p>
+        <ol className="public-intro-steps">
+          <li><strong>1</strong><span>{locale === "en" ? "Sign in with Google" : locale === "ja" ? "Google でログイン" : "使用 Google 帳號登入"}</span></li>
+          <li><strong>2</strong><span>{locale === "en" ? "Add countries, cities, dates, and memories" : locale === "ja" ? "国・都市・時期・思い出を記録" : "記錄國家、城市、月份與回憶"}</span></li>
+          <li><strong>3</strong><span>{locale === "en" ? "Explore your map and travel statistics" : locale === "ja" ? "地図と旅行統計を振り返る" : "查看世界地圖與旅遊統計"}</span></li>
+        </ol>
+        <p className="public-intro-privacy">{locale === "en" ? "Each account is stored separately. Other users cannot see your private travel records." : locale === "ja" ? "旅行記録はアカウントごとに個別保存され、ほかの利用者には表示されません。" : "每個帳號的旅行資料都會分開保存，其他使用者不會看到你的私人紀錄。"}</p>
+        <a className="public-intro-link" href="/guides">{locale === "en" ? "Read travel guides →" : locale === "ja" ? "旅のガイドを読む →" : "閱讀旅行指南 →"}</a>
+      </section>
+
       <footer className="site-footer"><span>© 2026 Jane Travel Map</span><nav><a href="/guides">{locale === "en" ? "Travel Guides" : locale === "ja" ? "旅のガイド" : "旅行指南"}</a><a href="/about">{t.about}</a><a href="/privacy">{t.privacy}</a><a href="/terms">{t.terms}</a><a href="/contact">{t.contact}</a></nav></footer>
 
       {modalOpen && <div className="modal-backdrop" onMouseDown={() => { setModalOpen(false); setEditingTrip(null); }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
