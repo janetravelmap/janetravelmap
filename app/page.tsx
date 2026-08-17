@@ -105,7 +105,7 @@ export default function Home() {
 
   useEffect(() => {
     document.documentElement.lang = locale === "zh-TW" ? "zh-Hant" : locale;
-    document.title = locale === "en" ? "My Travel Footprints" : locale === "ja" ? "わたしの旅の足あと" : "Jane 的旅行足跡";
+    document.title = locale === "en" ? "Jane Travel Map – My Travel Footprints" : locale === "ja" ? "Jane Travel Map｜わたしの旅の足あと" : "Jane Travel Map｜建立自己的旅行足跡";
   }, [locale]);
 
   function trackAnonymousEvent(event: "visit" | "start" | "convert") {
@@ -482,11 +482,7 @@ export default function Home() {
         </div> : <div className="stats-empty">{t.statsEmpty}</div>}
       </section>
 
-      <aside className="ad-strip" aria-label={t.ad}>
-        <span>{t.ad}</span><p>{t.adTitle}</p><small>{t.adHint}</small>
-      </aside>
-
-      <footer className="site-footer"><span>© 2026 Jane Travel Map</span><nav><a href="/about">{t.about}</a><a href="/privacy">{t.privacy}</a><a href="/terms">{t.terms}</a><a href="/contact">{t.contact}</a></nav></footer>
+      <footer className="site-footer"><span>© 2026 Jane Travel Map</span><nav><a href="/guides">{locale === "en" ? "Travel Guides" : locale === "ja" ? "旅のガイド" : "旅行指南"}</a><a href="/about">{t.about}</a><a href="/privacy">{t.privacy}</a><a href="/terms">{t.terms}</a><a href="/contact">{t.contact}</a></nav></footer>
 
       {modalOpen && <div className="modal-backdrop" onMouseDown={() => { setModalOpen(false); setEditingTrip(null); }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <button className="close" onClick={() => { setModalOpen(false); setEditingTrip(null); }} aria-label={t.close}>×</button><p className="eyebrow">{editingTrip ? "EDIT FOOTPRINT" : "NEW FOOTPRINT"}</p><h2>{editingTrip ? t.editFootprint : t.newFootprint}</h2><p>{editingTrip ? t.editHelp : t.newHelp}</p>
