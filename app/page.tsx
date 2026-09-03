@@ -495,7 +495,14 @@ export default function Home() {
         <a className="public-intro-link" href="/guides">{locale === "en" ? "Read travel guides →" : locale === "ja" ? "旅のガイドを読む →" : "閱讀旅行指南 →"}</a>
       </section>
 
-      <footer className="site-footer"><span>© 2026 Jane Travel Map</span><nav><a href="/guides">{locale === "en" ? "Travel Guides" : locale === "ja" ? "旅のガイド" : "旅行指南"}</a><a href="/about">{t.about}</a><a href="/privacy">{t.privacy}</a><a href="/terms">{t.terms}</a><a href="/contact">{t.contact}</a></nav></footer>
+      <footer className="site-footer">
+        <div className="creator-support">
+          <span className="creator-heart" aria-hidden="true">♡</span>
+          <span>{locale === "en" ? "Enjoying this website?" : locale === "ja" ? "このサイトを気に入っていただけましたか？" : "喜歡這個網站嗎？"}</span>
+          <a href="https://www.youtube.com/@JaneVlog0_0" target="_blank" rel="noopener noreferrer">{locale === "en" ? "Subscribe to Jane’s Vlog to support the creator" : locale === "ja" ? "Jane’s Vlog をチャンネル登録して応援" : "訂閱 Jane’s Vlog 支持創作者"}</a>
+        </div>
+        <div className="footer-meta"><span>© 2026 Jane Travel Map</span><nav><a href="/guides">{locale === "en" ? "Travel Guides" : locale === "ja" ? "旅のガイド" : "旅行指南"}</a><a href="/about">{t.about}</a><a href="/privacy">{t.privacy}</a><a href="/terms">{t.terms}</a><a href="/contact">{t.contact}</a></nav></div>
+      </footer>
 
       {modalOpen && <div className="modal-backdrop" onMouseDown={() => { setModalOpen(false); setEditingTrip(null); }}><div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <button className="close" onClick={() => { setModalOpen(false); setEditingTrip(null); }} aria-label={t.close}>×</button><p className="eyebrow">{editingTrip ? "EDIT FOOTPRINT" : "NEW FOOTPRINT"}</p><h2>{editingTrip ? t.editFootprint : t.newFootprint}</h2><p>{editingTrip ? t.editHelp : t.newHelp}</p>
