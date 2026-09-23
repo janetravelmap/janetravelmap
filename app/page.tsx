@@ -5,7 +5,7 @@ import { geoArea, geoMercator, geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import type { Feature, Geometry, Polygon } from "geojson";
 import type { GeometryCollection, Topology } from "topojson-specification";
-import worldData from "world-atlas/countries-50m.json";
+import worldData from "world-atlas/countries-10m.json";
 import { canonicalCountryCount, countryNameById, countryOptions, getCountryOptions } from "./countries";
 import { copy, detectLocale, localeLabels, localeStorageKey, type Locale } from "./i18n";
 
@@ -34,9 +34,6 @@ const worldCountries = feature(topology, topology.objects.countries as GeometryC
 
 const projection = geoNaturalEarth1().fitExtent([[20, 18], [800, 410]], { type: "FeatureCollection", features: worldCountries.map((item) => item.geometry) });
 const mapPath = geoPath(projection);
-const smallCountryMarkers = [
-  { id: "702", coordinates: [103.8198, 1.3521] as [number, number] },
-];
 
 function resolveCountryId(countryName: string) {
   const normalized = countryName.trim().toLowerCase();
@@ -433,13 +430,6 @@ export default function Home() {
               {worldCountries.map((country) => <path key={country.id} d={mapPath(country.geometry) ?? ""} className={visitedIds.has(country.id) ? "visited" : "land"}>
                 <title>{localizedCountryNameById.get(country.id) ?? country.name}{visitedIds.has(country.id) ? t.visitedSuffix : ""}</title>
               </path>)}
-              {smallCountryMarkers.filter((marker) => visitedIds.has(marker.id)).map((marker) => {
-                const point = projection(marker.coordinates);
-                if (!point) return null;
-                return <circle key={marker.id} className="small-country-marker" cx={point[0]} cy={point[1]} r={5.5}>
-                  <title>{localizedCountryNameById.get(marker.id) ?? "Singapore"}{t.visitedSuffix}</title>
-                </circle>;
-              })}
             </g>
           </svg>
           <div className="zoom"><button aria-label={t.zoomIn} onClick={() => changeZoom(mapZoom + .25)}>＋</button><button aria-label={t.zoomOut} onClick={() => changeZoom(mapZoom - .25)}>−</button><button aria-label={t.resetMap} onClick={() => { setMapZoom(1); setMapPan({ x: 0, y: 0 }); }}>↺</button></div>
