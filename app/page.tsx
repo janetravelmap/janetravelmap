@@ -362,10 +362,11 @@ export default function Home() {
 
   function movePan(event: ReactPointerEvent<SVGSVGElement>) {
     if (!dragStart.current) return;
-    const limit = 150 * (mapZoom - 1);
+    const horizontalLimit = 410 * (mapZoom - 1);
+    const verticalLimit = 215 * (mapZoom - 1);
     setMapPan({
-      x: Math.max(-limit, Math.min(limit, dragStart.current.panX + event.clientX - dragStart.current.pointerX)),
-      y: Math.max(-limit * .65, Math.min(limit * .65, dragStart.current.panY + event.clientY - dragStart.current.pointerY)),
+      x: Math.max(-horizontalLimit, Math.min(horizontalLimit, dragStart.current.panX + event.clientX - dragStart.current.pointerX)),
+      y: Math.max(-verticalLimit, Math.min(verticalLimit, dragStart.current.panY + event.clientY - dragStart.current.pointerY)),
     });
   }
 
@@ -376,8 +377,13 @@ export default function Home() {
 
   function changeZoom(nextZoom: number) {
     const zoom = Math.max(1, Math.min(4, nextZoom));
+    const horizontalLimit = 410 * (zoom - 1);
+    const verticalLimit = 215 * (zoom - 1);
     setMapZoom(zoom);
-    if (zoom === 1) setMapPan({ x: 0, y: 0 });
+    setMapPan((current) => zoom === 1 ? { x: 0, y: 0 } : {
+      x: Math.max(-horizontalLimit, Math.min(horizontalLimit, current.x)),
+      y: Math.max(-verticalLimit, Math.min(verticalLimit, current.y)),
+    });
   }
 
   function startCityPan(event: ReactPointerEvent<SVGSVGElement>) {
