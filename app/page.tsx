@@ -5,7 +5,8 @@ import { geoArea, geoMercator, geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import type { Feature, Geometry, Polygon } from "geojson";
 import type { GeometryCollection, Topology } from "topojson-specification";
-import worldData from "world-atlas/countries-10m.json";
+import worldData from "world-atlas/countries-50m.json";
+import detailedWorldData from "world-atlas/countries-10m.json";
 import { canonicalCountryCount, countryNameById, countryOptions, getCountryOptions } from "./countries";
 import { copy, detectLocale, localeLabels, localeStorageKey, type Locale } from "./i18n";
 
@@ -31,6 +32,10 @@ const worldCountries = feature(topology, topology.objects.countries as GeometryC
     label: countryNameById.get(String(country.id).padStart(3, "0")) ?? specialZhNames[String(country.properties?.name ?? "")] ?? String(country.properties?.name ?? ""),
     geometry: country,
   })).sort((a, b) => a.label.localeCompare(b.label, "zh-Hant"));
+
+const detailedTopology = detailedWorldData as unknown as Topology;
+const singaporeGeometry = feature(detailedTopology, detailedTopology.objects.countries as GeometryCollection).features
+  .find((country) => String(country.properties?.name ?? "").toLowerCase() === "singapore") as Feature<Geometry> | undefined;
 
 const projection = geoNaturalEarth1().fitExtent([[20, 18], [800, 410]], { type: "FeatureCollection", features: worldCountries.map((item) => item.geometry) });
 const mapPath = geoPath(projection);
@@ -370,7 +375,7 @@ export default function Home() {
   }
 
   function changeZoom(nextZoom: number) {
-    const zoom = Math.max(1, Math.min(2.2, nextZoom));
+    const zoom = Math.max(1, Math.min(4, nextZoom));
     setMapZoom(zoom);
     if (zoom === 1) setMapPan({ x: 0, y: 0 });
   }
@@ -430,6 +435,9 @@ export default function Home() {
               {worldCountries.map((country) => <path key={country.id} d={mapPath(country.geometry) ?? ""} className={visitedIds.has(country.id) ? "visited" : "land"}>
                 <title>{localizedCountryNameById.get(country.id) ?? country.name}{visitedIds.has(country.id) ? t.visitedSuffix : ""}</title>
               </path>)}
+              {visitedIds.has("702") && singaporeGeometry && <path d={mapPath(singaporeGeometry) ?? ""} className="visited">
+                <title>{localizedCountryNameById.get("702") ?? "Singapore"}{t.visitedSuffix}</title>
+              </path>}
             </g>
           </svg>
           <div className="zoom"><button aria-label={t.zoomIn} onClick={() => changeZoom(mapZoom + .25)}>＋</button><button aria-label={t.zoomOut} onClick={() => changeZoom(mapZoom - .25)}>−</button><button aria-label={t.resetMap} onClick={() => { setMapZoom(1); setMapPan({ x: 0, y: 0 }); }}>↺</button></div>
