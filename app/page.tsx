@@ -39,6 +39,7 @@ const singaporeGeometry = feature(detailedTopology, detailedTopology.objects.cou
 
 const projection = geoNaturalEarth1().fitExtent([[20, 18], [800, 410]], { type: "FeatureCollection", features: worldCountries.map((item) => item.geometry) });
 const mapPath = geoPath(projection);
+const singaporeCentroid = singaporeGeometry ? mapPath.centroid(singaporeGeometry) : null;
 
 function resolveCountryId(countryName: string) {
   const normalized = countryName.trim().toLowerCase();
@@ -441,7 +442,12 @@ export default function Home() {
               {worldCountries.map((country) => <path key={country.id} d={mapPath(country.geometry) ?? ""} className={visitedIds.has(country.id) ? "visited" : "land"}>
                 <title>{localizedCountryNameById.get(country.id) ?? country.name}{visitedIds.has(country.id) ? t.visitedSuffix : ""}</title>
               </path>)}
-              {visitedIds.has("702") && singaporeGeometry && <path d={mapPath(singaporeGeometry) ?? ""} className="visited">
+              {visitedIds.has("702") && singaporeGeometry && singaporeCentroid && <path
+                d={mapPath(singaporeGeometry) ?? ""}
+                className="visited"
+                transform={`translate(${singaporeCentroid[0]} ${singaporeCentroid[1]}) scale(5) translate(${-singaporeCentroid[0]} ${-singaporeCentroid[1]})`}
+                vectorEffect="non-scaling-stroke"
+              >
                 <title>{localizedCountryNameById.get("702") ?? "Singapore"}{t.visitedSuffix}</title>
               </path>}
             </g>
